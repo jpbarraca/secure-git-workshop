@@ -18,9 +18,9 @@ However, you can use [trivy](https://github.com/aquasecurity/trivy) as well.
 make container_scanning
 ```
 
-### Your done 👍 move to final step
+### Your done 👍 move to next step
 ```bash
-git checkout the-end
+git checkout step7
 ```
 
 ### Extra challenge
