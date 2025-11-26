@@ -1,0 +1,91 @@
+name: CI - DAST API scanning
+on:
+  push:
+    branches: [ step5 ]
+    paths:
+     - 'rest-api-goat/py-web/Dockerfile'
+     - 'rest-api-goat/Dockerfile'
+     - 'rest-api-goat/.dockerignore'
+     - 'rest-api-goat/zap-api-scan.sh'
+     - 'rest-api-goat/docker-compose.yaml'
+     - '.github/workflows/api-scanning.yml'
+  pull_request:
+    branches: [ step5 ]
+    paths:
+     - 'rest-api-goat/py-web/Dockerfile'
+     - 'rest-api-goat/Dockerfile'
+     - 'rest-api-goat/.dockerignore'
+     - 'rest-api-goat/zap-api-scan.sh'
+     - 'rest-api-goat/docker-compose.yaml'
+     - '.github/workflows/api-scanning.yml'
+
+env:
+  ## Sets environment variables
+  ENV: "dev"
+  DELETE_FLAG: "true"
+  TARGET_API_DEF: "py-web/openapi.json"
+  API_REPORT_FILE: "api_report.json"
+  APP_DIR: "rest-api-goat"
+  REPORT_FOLDER: "reports"
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+
+    steps:
+    # Checks-out our repository
+    - name: Checkout
+      uses: actions/checkout@v2
+    
+    - name: Setup
+      run: |-
+        sudo apt-get update -y
+        sudo apt-get install ca-certificates curl -y
+        sudo install -m 0755 -d /etc/apt/keyrings
+        sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+        sudo chmod a+r /etc/apt/keyrings/docker.asc
+        echo \
+          "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
+          $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+          sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+        sudo apt-get update -y
+        sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-compose -y
+
+    # Cleanup
+    - name: Cleanup
+      run: |-
+        pushd "${{env.APP_DIR}}"
+        if [ "${{env.DELETE_FLAG}}" == "true" ]
+        then
+          docker-compose rm -f web
+          docker-compose rm -f py-web
+        fi
+        popd
+
+    # Run REST API Goat
+    - name: Run-API
+      run: |-
+        pushd "${{env.APP_DIR}}"
+        docker-compose build --no-cache web
+        docker-compose up -d web
+        docker-compose logs web
+        popd
+        
+    # Serve Goat OpenAPI definition
+    - name: Serve-API-Definition
+      run: |-
+        pushd "${{env.APP_DIR}}"
+        docker-compose build --no-cache py-web
+        docker-compose up -d py-web
+        docker-compose logs py-web
+        popd
+        
+    # Launch API scan
+    - name: Scan-API
+      uses: zaproxy/action-api-scan@v0.9.0
+      with:
+        docker_name: 'ghcr.io/zaproxy/zaproxy:stable'
+        format: openapi
+        # The target should be changed in the future for the local file
+        target: https://raw.githubusercontent.com/detiuaveiro/secure-git-workshop/refs/heads/step5/rest-api-goat/py-web/openapi.json
+        cmd_options: -z "-config replacer.full_list(0).description=content" -z "-config replacer.full_list(0).enabled=true" -z "-config replacer.full_list(0).matchtype=REQ_HEADER" -z "-config replacer.full_list(0).matchstr=Content-Type" -z "-config replacer.full_list(0).regex=false" -z "-config replacer.full_list(0).replacement='application/octet-stream'" -z "-config replacer.full_list(0).description=accept" -z "-config replacer.full_list(0).enabled=true" -z "-config replacer.full_list(0).matchtype=REQ_HEADER" -z "-config replacer.full_list(0).matchstr=Accept" -z "-config replacer.full_list(0).regex=false" -z "-config replacer.full_list(0).replacement='application\/json'" -z "-config replacer.full_list(0).description=auth1" -z "-config replacer.full_list(0).enabled=true" -z "-config replacer.full_list(0).matchtype=REQ_HEADER" -z "-config replacer.full_list(0).matchstr=X-API-Token" -z "-config replacer.full_list(0).regex=false" -z "-config replacer.full_list(0).replacement=${api_key}"
